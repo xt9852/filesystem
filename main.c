@@ -28,6 +28,7 @@
 #define ATT_SIZE                8
 #define DIR_SIZE                32
 #define FAT_SIZE                256
+#define MIRR_SIZE               4
 #define UPCASE_SIZE             256
 #define BITMAP_SIZE             512
 #define CLUSTER_SIZE            512
@@ -186,7 +187,7 @@ typedef struct _fat16_dir_short                     // FAT16的短文件名目�
 
 } fat16_dir_short, *p_fat16_dir_short;
 
-typedef struct _fat_dir_long                        // FAT的长文件名目录项
+typedef struct _fat_dir_long                        // FAT16/32的长文件名目录项
 {
     unsigned char           flag;                   // 40-最后一个目录项,0-1F序号
     unsigned short          filename1[5];           // UNICODE
@@ -199,10 +200,10 @@ typedef struct _fat_dir_long                        // FAT的长文件名目录�
 
 } fat_dir_long, *p_fat_dir_long;
 
-typedef union _fat16_dir
+typedef union  _fat16_dir                           // FAT16目录项
 {
-    fat16_dir_short         s;
     fat_dir_long            l;
+    fat16_dir_short         s;
 
 } fat16_dir, *p_fat16_dir;
 
@@ -300,23 +301,10 @@ typedef struct _fat32_dir_short                     // FAT32的短文件名目�
 
 } fat32_dir_short, *p_fat32_dir_short;
 
-typedef struct _fat32_dir_long                      // FAT32的长文件名目录项
+typedef union  _fat32_dir                           // FAT32目录项
 {
-    unsigned char           flag;                   // 40-最后一个目录项,0-7:序号
-    unsigned short          filename1[5];           // UNICODE
-    unsigned char           attr;                   // 属性:F-长文件名,1-只读,2-隐藏,4-系统,8-卷标,10-目录,20-归档
-    unsigned char           reserve;                // 保留
-    unsigned char           check;                  // 校验码,根据短文件名计算得出
-    unsigned short          filename2[6];           // UNICODE
-    unsigned short          cluster_id;             // 文件的首簇号
-    unsigned short          filename3[2];           // UNICODE
-
-} fat32_dir_long, *p_fat32_dir_long;
-
-typedef union _fat32_dir
-{
-    fat32_dir_short         s;
     fat_dir_long            l;
+    fat32_dir_short         s;
 
 } fat32_dir, *p_fat32_dir;
 
@@ -424,8 +412,7 @@ typedef struct _UtcOffset                          // UTC偏移
 
 } UtcOffset, *p_UtcOffset;
 
-// 卷GUID目录,TypeCode为0,TypeImportance为1,TypeCategory为0
-typedef struct _exfat_dir_guid
+typedef struct _exfat_dir_guid                      // 卷GUID目录
 {
     unsigned char           SecondaryCount;                     // 0
     unsigned short          SetChecksum;
@@ -435,8 +422,7 @@ typedef struct _exfat_dir_guid
 
 } exfat_dir_guid, *p_exfat_dir_guid;
 
-// 流扩展目录,TypeCode为0,TypeImportance为0,TypeCategory为1
-typedef struct _exfat_dir_ext
+typedef struct _exfat_dir_ext                       // 流扩展目录
 {
     unsigned char           GeneralSecondaryFlags_UseCluster:1; // 1
     unsigned char           GeneralSecondaryFlags_NoFatChain:1;
@@ -451,8 +437,7 @@ typedef struct _exfat_dir_ext
 
 } exfat_dir_ext, *p_exfat_dir_ext;
 
-// 位图目录,TypeCode为1,TypeImportance为0,TypeCategory为0
-typedef struct _exfat_dir_bitmap
+typedef struct _exfat_dir_bitmap                    // 位图目录
 {
     unsigned char           BitmapFlags_BitmapIdentifier:1;     // 0-FAT1中分配,1-FAT2中分配
     unsigned char           CustomDefined[18];
@@ -461,8 +446,7 @@ typedef struct _exfat_dir_bitmap
 
 } exfat_dir_bitmap, *p_exfat_dir_bitmap;
 
-// 文件名目录,TypeCode为1,TypeImportance为0,TypeCategory为1,最大数目为17,最多255个字符
-typedef struct _exfat_dir_filename
+typedef struct _exfat_dir_filename                  // 文件名目录
 {
     unsigned char           GeneralSecondaryFlags_UseCluster:1; // 0
     unsigned char           GeneralSecondaryFlags_NoFatChain:1;
@@ -470,8 +454,7 @@ typedef struct _exfat_dir_filename
 
 } exfat_dir_filename, *p_exfat_dir_filename;
 
-// 大写目录,TypeCode为2,TypeImportance为0,TypeCategory为0,WINDOWS系统目录不区分大小写
-typedef struct _exfat_dir_upcase
+typedef struct _exfat_dir_upcase                    // 大小写映射目录,WINDOWS系统目录不区分大小写
 {
     unsigned char           Reserved1[3];
     unsigned int            TableChecksum;
@@ -481,16 +464,14 @@ typedef struct _exfat_dir_upcase
 
 } exfat_dir_upcase, *p_exfat_dir_upcase;
 
-// 卷标目录,TypeCode为3,TypeImportance为0,TypeCategory为0
-typedef struct _exfat_dir_volume_label
+typedef struct _exfat_dir_volume_label              // 卷标目录
 {
     unsigned char           CharacterCount;         // UNICODE字符串长
     unsigned short          VolumeLabel[11];
 
 } exfat_dir_volume_label, *p_exfat_dir_volume_label;
 
-// 文件目录,TypeCode为5,TypeImportance为0,TypeCategory为0
-typedef struct _exfat_dir_file
+typedef struct _exfat_dir_file                      // 文件目录
 {
     unsigned char           SecondaryCount;         // 辅助目录条目数
     unsigned short          SetChecksum;            // 校验和
@@ -914,12 +895,7 @@ typedef struct _ntfs_info                           // NTFS信息
 
     ntfs_mft                mft[MFT_SIZE];
 
-    ntfs_mft                mirr[MFT_SIZE];
-
-    HTREEITEM               tree_dbr;               // 树节点
-    HTREEITEM               tree_mft;
-    HTREEITEM               tree_mirr;
-    HTREEITEM               tree_dir;
+    ntfs_mft                mirr[MIRR_SIZE];
 
 } ntfs_info, *p_ntfs_info;
 
@@ -993,11 +969,12 @@ TCHAR       txt[512];
 
 /**
  * \brief   得到簇流数据,第1字节前4位为使用簇数量长度大小,后4位为起始簇位置数据大小
- *          例:32 00 01 56 34 12
+ *          例:32 00 01 56 34 12 00
  *          使用簇数量长度大小: 3
  *          起始簇位置数据大小: 2
  *          起始簇位置: 123456
  *          使用簇数量: 0100
+ *          结束标志: 00
  * \param   [in]    unsigned char       *data           得到簇流数据
  * \param   [out]   unsigned int        *beg            簇开始
  * \param   [out]   unsigned int        *len            簇数量
@@ -1007,6 +984,7 @@ void get_cluster_rundata(unsigned char *data, p_ntfs_mft_attr_head_un head_un)
 {
     unsigned __int64 beg;
     unsigned __int64 len;
+    unsigned __int64 tmp;
     p_cluster_rundata_head head;
 
     for (int i = 0; i < RUNDATA_SIZE; i++)
@@ -1025,14 +1003,16 @@ void get_cluster_rundata(unsigned char *data, p_ntfs_mft_attr_head_un head_un)
 
         for (int j = 0; j < head->len; j++)
         {
-            len |= data[j] << (j * 8);
+            tmp = data[j];
+            len |= tmp << (j * 8);
         }
 
         data += head->len;
 
         for (int j = 0; j < head->beg; j++)
         {
-            beg |= data[j] << (j * 8);
+            tmp = data[j];
+            beg |= tmp << (j * 8);
         }
 
         data += head->beg;
@@ -1094,7 +1074,9 @@ int get_mft_data(HANDLE device, unsigned __int64 pos, p_ntfs_mft mft, bool mirr)
 
     get_sector_data(device, pos, len, buf);
 
-    for (int i = 0; i < MFT_SIZE; i++, mft++)
+    int count = mirr ? MIRR_SIZE : MFT_SIZE;
+
+    for (int i = 0; i < count; i++, mft++)
     {
         pt = buf + i * 1024;
         mft->data = *(p_ntfs_mft_data)pt;
@@ -1489,6 +1471,12 @@ int get_disk_info(int max, p_disk_info disk_array)
     return i;
 }
 
+/**
+ * \brief   在父节点的最后插入子节点
+ * \param   [in]    HTREEITEM           parent           父句柄
+ * \param   [in]    TCHAR               *txt             文本
+ * \return  节点句柄
+ */
 HTREEITEM tree_insert_sub(HTREEITEM parent, TCHAR *txt)
 {
     TVINSERTSTRUCT tv;
@@ -1500,6 +1488,12 @@ HTREEITEM tree_insert_sub(HTREEITEM parent, TCHAR *txt)
     return TreeView_InsertItem(g_tree, &tv);
 }
 
+/**
+ * \brief   在父节点排序插入子节点
+ * \param   [in]    HTREEITEM           parent           父句柄
+ * \param   [in]    TCHAR               *txt             文本
+ * \return  节点句柄
+ */
 HTREEITEM tree_insert_sort(HTREEITEM parent, TCHAR *txt)
 {
     TVINSERTSTRUCT tv;
@@ -2272,7 +2266,9 @@ void tree_ntfs_mft(HTREEITEM parent, unsigned __int64 pos, p_ntfs_mft mft, bool 
     SP(_T("扇区:%08I64X %s"), pos, mirr ? _T("MIRR") : _T("MFT"));
     HTREEITEM file = tree_insert_sort(parent, txt);
 
-    for (int i = 0; i < MFT_SIZE && mft->data.name[0] != 0; i++, mft++)
+    int count = mirr ? MIRR_SIZE : MFT_SIZE;
+
+    for (int i = 0; i < count; i++, mft++)
     {
         attr = mft->attr;
         data = &(mft->data);
