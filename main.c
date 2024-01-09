@@ -24,18 +24,19 @@
 #define SIZEOF(x)               sizeof(x)/sizeof(x[0])
 #define SP(...)                 _stprintf_s(txt, SIZEOF(txt), __VA_ARGS__)
 
-#define FAT_SIZE                256
-#define MFT_SIZE                128
-#define ATT_SIZE                8
-#define DIR_SIZE                32
-#define MIRR_SIZE               4
-#define ITEM_SIZE               16
-#define INDEX_SIZE              128
-#define UPCASE_SIZE             256
-#define BITMAP_SIZE             512
-#define CLUSTER_SIZE            512
-#define RUNDATA_SIZE            128
-#define ROOT_INDEX_SIZE         16
+#define FAT_SIZE                256     // FAT数量
+#define MFT_SIZE                128     // MFT数量
+#define MIRR_SIZE               4       // MIRR数量
+#define MFT_ATTR_SIZE           8       // 每个MFT记录的属性数量
+#define ATTR_LIST_SIZE          8       // 20属性列表,列表项数量
+#define DIR_SIZE                32      // 目录项数量
+#define UPCASE_SIZE             256     // 大小写映射项数量
+#define BITMAP_SIZE             512     // 位图项数量
+#define CLUSTER_SIZE            512     // 簇内数据数量
+#define RUNDATA_SIZE            128     // 簇运行数量
+#define INDEX_ROOT_ENTRY_SIZE   8       // 索引根中的索引项数量
+#define INDEX_ALLOC_SIZE        4       // 索引分配数量
+#define INDEX_ALLOC_ENTRY_SIZE  32      // 索引分配中的索引项数量
 
 TCHAR *bus_type_text[]  = { _T("Unknown"),
                             _T("SCSI"),
@@ -334,8 +335,8 @@ typedef struct _fat32_info                          // FAT32信息
 
 } fat32_info, *p_fat32_info;
 
-// EXFAT区域名称    扇区Offset
-//                  1
+// EXFAT区域名称    扇区位置
+//
 // 主启动区域
 // 主启动扇区       0
 // 主扩展启动扇区   1
@@ -581,7 +582,7 @@ typedef struct _ntfs_mft_attr_body_10               // 标准属性
 
 } ntfs_mft_attr_body_10, *p_ntfs_mft_attr_body_10;
 
-typedef struct _ntfs_mft_attr_body_20_item          // 属性列表项
+typedef struct _ntfs_mft_attr_body_20_attr_list     // 属性列表项
 {
     unsigned int            type;                   // 类型
     unsigned short          len;                    // 记录长度
@@ -592,13 +593,13 @@ typedef struct _ntfs_mft_attr_body_20_item          // 属性列表项
     unsigned short          id;                     // 属性ID(每个属性都有一个唯一的ID号)
     unsigned short          name[256];              // Unicode属性名(如果有属性名, 大小2N)
 
-} ntfs_mft_attr_body_20_item, *p_ntfs_mft_attr_body_20_item;
+} ntfs_mft_attr_body_20_attr_list, *p_ntfs_mft_attr_body_20_attr_list;
 
 typedef struct _ntfs_mft_attr_body_20               // 属性列表
 {
-    ntfs_mft_attr_body_20_item  item[ITEM_SIZE];
+    ntfs_mft_attr_body_20_attr_list  attr_list[ATTR_LIST_SIZE];
 
-    unsigned char item_count;
+    unsigned char                    attr_list_count;
 
 } ntfs_mft_attr_body_20, *p_ntfs_mft_attr_body_20;
 
@@ -629,7 +630,7 @@ typedef struct _ntfs_mft_attr_body_30               // 文件名
     unsigned int            eas;                    // 用于EAS和重解析点
     unsigned char           filename_len;           // 以字符计的文件名长度
     unsigned char           namespace;              // 文件名命名空间:0-POSIX命名空间,1-Win32命名空间,2-DOS命名空间;3-Win32&DOS命名空间
-    unsigned short          name[256];               // 以Unicode方式表示的文件名
+    unsigned short          name[256];              // 以Unicode方式表示的文件名
 
 } ntfs_mft_attr_body_30, *p_ntfs_mft_attr_body_30;
 
@@ -673,26 +674,28 @@ typedef struct _ntfs_mft_attr_body_70               // 卷信息
 
 typedef struct _ntfs_mft_attr_body_80               // 文件数据
 {
-    unsigned char           data[1024];             // 常驻,属性体是数据内容,非常驻,属性体是簇流运行
+    unsigned char           data[32];               // 常驻,属性体是数据内容,非常驻,属性体是簇流运行
 
 } ntfs_mft_attr_body_80, *p_ntfs_mft_attr_body_80;
 
-typedef struct _ntfs_mft_attr_index_file_head       // 索引文件头
+typedef struct _ntfs_mft_attr_index_root_head       // 索引根头
 {
-    unsigned char           name[4];                // "INDX"
-    unsigned short          update_sn_offset;       // 更新序列号偏移
-    unsigned short          update_sn_size;         // 更新序列号长度
-    unsigned __int64        logfile_sn;             // 日志文件序列号
-    unsigned __int64        vcn;                    // 本索引记录在索引分配中的VCN
-    unsigned int            entry_offset;           // 索引项偏移
-    unsigned int            entry_size;             // 索引项大小
-    unsigned int            entry_size_alloc;       // 索引项分配大小
-    unsigned char           flag;                   // 标志:1-有子节点
-    unsigned char           zero[3];                // 0
-    unsigned short          update_sn;              // 更新序列
-    unsigned char           update_array[16];       // 更新序列数组
+    unsigned int            type;                   // 索引的属性类型
+    unsigned int            rule;                   // 分类规则
+    unsigned int            size_byte;              // 每个索引记录的大小(字节数)
+    unsigned char           size_cluster;           // 每个索引记录的大小簇数
+    unsigned char           reserve[3];             // 未用
 
-} ntfs_mft_attr_index_file_head, *p_ntfs_mft_attr_index_file_head;
+} ntfs_mft_attr_index_root_head, *p_ntfs_mft_attr_index_root_head;
+
+typedef struct _ntfs_mft_attr_index_root_body       // 索引根体
+{
+    unsigned int            pos_head;               // 索引项列表起始偏移(相对于节点头起始处)
+    unsigned int            pos_tail_used;          // 索引项列表已用部分的结尾偏移(相对于节点头起始处)
+    unsigned int            pos_tail_buf;           // 索引项列表缓冲区的结尾偏移(相对于节点头起始处)
+    unsigned int            flag;                   // 标志,如果有其它节点指向该节点,此值为0x01
+
+} ntfs_mft_attr_index_root_body, *p_ntfs_mft_attr_index_root_body;
 
 typedef struct _ntfs_mft_attr_index_entry           // 索引项
 {
@@ -711,38 +714,46 @@ typedef struct _ntfs_mft_attr_index_entry           // 索引项
 
 } ntfs_mft_attr_index_entry, *p_ntfs_mft_attr_index_entry;
 
-typedef struct _ntfs_mft_attr_index_root_body       // 索引根体
-{
-    unsigned int            pos_head;               // 索引项列表起始偏移(相对于节点头起始处)
-    unsigned int            pos_tail_used;          // 索引项列表已用部分的结尾偏移(相对于节点头起始处)
-    unsigned int            pos_tail_buf;           // 索引项列表缓冲区的结尾偏移(相对于节点头起始处)
-    unsigned int            flag;                   // 标志,如果有其它节点指向该节点,此值为0x01
-
-} ntfs_mft_attr_index_root_body, *p_ntfs_mft_attr_index_root_body;
-
-typedef struct _ntfs_mft_attr_index_root_head       // 索引根头
-{
-    unsigned int            type;                   // 索引的属性类型
-    unsigned int            rule;                   // 分类规则
-    unsigned int            size_byte;              // 每个索引记录的大小(字节数)
-    unsigned char           size_cluster;           // 每个索引记录的大小簇数
-    unsigned char           reserve[3];             // 未用
-
-} ntfs_mft_attr_index_root_head, *p_ntfs_mft_attr_index_root_head;
-
 typedef struct _ntfs_mft_attr_body_90               // 索引根,常驻
 {
     ntfs_mft_attr_index_root_head   head;
     ntfs_mft_attr_index_root_body   body;
 
-    ntfs_mft_attr_index_entry       entry[ROOT_INDEX_SIZE];
+    ntfs_mft_attr_index_entry       entry[INDEX_ROOT_ENTRY_SIZE];
     unsigned char                   entry_count;
 
 } ntfs_mft_attr_body_90, *p_ntfs_mft_attr_body_90;
 
+typedef struct _ntfs_mft_attr_index_alloc_head      // 索引分配头
+{
+    unsigned char           name[4];                // "INDX"
+    unsigned short          update_sn_offset;       // 更新序列号偏移
+    unsigned short          update_sn_size;         // 更新序列号长度
+    unsigned __int64        logfile_sn;             // 日志文件序列号
+    unsigned __int64        vcn;                    // 本索引记录在索引分配中的VCN
+    unsigned int            entry_offset;           // 索引项偏移
+    unsigned int            entry_size;             // 索引项大小
+    unsigned int            entry_size_alloc;       // 索引项分配大小
+    unsigned char           flag;                   // 标志:1-有子节点
+    unsigned char           zero[3];                // 0
+    unsigned short          update_sn;              // 更新序列
+    unsigned char           update_array[16];       // 更新序列数组
+
+} ntfs_mft_attr_index_alloc_head, *p_ntfs_mft_attr_index_alloc_head;
+
+typedef struct _ntfs_index_alloc                    // 索引组
+{
+    ntfs_mft_attr_index_alloc_head  head;
+
+    ntfs_mft_attr_index_entry       entry[INDEX_ALLOC_ENTRY_SIZE];
+
+    unsigned int                    entry_count;
+
+} ntfs_index_alloc, *p_ntfs_index_alloc;
+
 typedef struct _ntfs_mft_attr_body_A0               // 索引分配树节点,非常驻
 {
-  int a;
+    int a;
 
 } ntfs_mft_attr_body_A0, *p_ntfs_mft_attr_body_A0;
 
@@ -889,19 +900,9 @@ typedef struct _ntfs_mft                            // MFT信息
 {
     ntfs_mft_head           head;
 
-    ntfs_mft_attr           attr[ATT_SIZE];
+    ntfs_mft_attr           attr[MFT_ATTR_SIZE];
 
 } ntfs_mft, *p_ntfs_mft;
-
-typedef struct _ntfs_root                           // 根目录索引
-{
-    ntfs_mft_attr_index_file_head   index_file_head;
-
-    ntfs_mft_attr_index_entry       index_entry[INDEX_SIZE];
-
-    unsigned int                    index_entry_count;
-
-} ntfs_root, *p_ntfs_root;
 
 typedef struct _ntfs_dbr                            // NTFS的DBR数据
 {
@@ -953,11 +954,11 @@ typedef struct _ntfs_info                           // NTFS信息
 
     ntfs_dbr                dbr;
 
-    ntfs_root               root;
+    ntfs_index_alloc        root[INDEX_ALLOC_SIZE];
 
-    ntfs_mft                mft[MFT_SIZE];
+    ntfs_mft                mft[MFT_SIZE];          // 主文件表
 
-    ntfs_mft                mirr[MIRR_SIZE];
+    ntfs_mft                mirr[MIRR_SIZE];        // 备份文件表(前4项)
 
     unsigned char           cluster[DIR_SIZE][CLUSTER_SIZE];// 簇数据
 
@@ -965,13 +966,13 @@ typedef struct _ntfs_info                           // NTFS信息
 
     unsigned short          upcase[UPCASE_SIZE];    // 大小写映射
 
-    unsigned int            mft_count;
+    unsigned __int64        mft_id[MFT_SIZE];       // MFT序号
 
-    unsigned __int64        mft_id[MFT_SIZE];
+    unsigned int            mft_count;              // MFT数量
 
 } ntfs_info, *p_ntfs_info;
 
-typedef struct _part_table_data                     // 分区表数据
+typedef struct _part_table_item                     // 分区表数据
 {
     unsigned char           system;                 // 80存在操作系统的00不存在操作系统
     unsigned char           sector_start[3];        // 开始磁头-第1字节,扇区-第2字节的低6位,柱面–第2字节高2位+第3字节8位
@@ -980,7 +981,7 @@ typedef struct _part_table_data                     // 分区表数据
     unsigned int            offset;                 // 该分区相对上一级分区的位移量
     unsigned int            size;                   // 该分区所占扇区数量
 
-} part_table_data, *p_part_table_data;
+} part_table_item, *p_part_table_item;
 
 typedef struct _mbr_data                            // 主启动分区数据
 {
@@ -988,7 +989,7 @@ typedef struct _mbr_data                            // 主启动分区数据
 
     unsigned char           disk_id[6];             // 磁盘签名
 
-    part_table_data         part_table[4];          // 分区表
+    part_table_item         part_table[4];          // 分区表
 
     // sig
     unsigned short          sig;                    // 0xAA55
@@ -1031,17 +1032,24 @@ typedef struct _disk_info {                         // 磁盘信息
 
 #pragma pack(pop)
 
-int         g_disk_count    = 0;
-disk_info   g_disk[8]       = {0};
+unsigned int    g_disk_count    = 0;
+disk_info       g_disk[4]       = {0};
 
-TCHAR      *g_title         = _T("ntfs");
-HFONT       g_font          = NULL;
-HWND        g_tree          = NULL;
-TCHAR       txt[512];
+TCHAR          *g_title         = _T("ntfs");
+HFONT           g_font          = NULL;
+HWND            g_tree          = NULL;
+TCHAR           txt[512];
 
-void get_unicode_str(TCHAR *out, char *in, int len)
+/**
+ * \brief   将字符串转成UNICODE字符串
+ * \param   [out]   WCHAR               *out            unicode字符串
+ * \param   [in]    const char          *in             字符串
+ * \param   [in]    unsigned int        len             字符串长度
+ * \return  无
+ */
+void get_unicode_str(WCHAR *out, const char *in, unsigned int len)
 {
-    int i, head = _tcslen(txt);
+    unsigned int i, head = wcslen(txt);
 
     for (i = 0; i < len && *in != '\0'; i++, in++)
     {
@@ -1199,7 +1207,7 @@ int get_ntfs_mft_data(HANDLE device, unsigned __int64 pos, p_ntfs_mft mft, unsig
         attr = mft->attr;
         buf_head_up = buf + head->attr_pos;
 
-        for (int j = 0; j < ATT_SIZE; buf_head_up += head_up->size, j++, attr++)
+        for (int j = 0; j < MFT_ATTR_SIZE; buf_head_up += head_up->size, j++, attr++)
         {
             head_up  = &(attr->head_up);
             head_at  = &(attr->head_at);
@@ -1264,14 +1272,14 @@ int get_ntfs_mft_data(HANDLE device, unsigned __int64 pos, p_ntfs_mft mft, unsig
                     case 0xF0:  *body_F0  = *(p_ntfs_mft_attr_body_F0)buf_body;  break;*/
                     case 0x20:
                     {
-                        p_ntfs_mft_attr_body_20_item item = body_20->item;
+                        p_ntfs_mft_attr_body_20_attr_list attr_list = body_20->attr_list;
 
-                        for (unsigned int i = 0, pos = 0; i < ITEM_SIZE && pos < head_at->body_size; i++, pos += item++->len)
+                        for (unsigned int i = 0, pos = 0; i < ATTR_LIST_SIZE && pos < head_at->body_size; i++, pos += attr_list++->len)
                         {
-                            *item = *(p_ntfs_mft_attr_body_20_item)(buf_body + pos);
-                            item->name[item->name_len] = 0;
+                            *attr_list = *(p_ntfs_mft_attr_body_20_attr_list)(buf_body + pos);
+                            attr_list->name[attr_list->name_len] = 0;
 
-                            body_20->item_count++;
+                            body_20->attr_list_count++;
                         }
                         break;
                     }
@@ -1297,7 +1305,7 @@ int get_ntfs_mft_data(HANDLE device, unsigned __int64 pos, p_ntfs_mft mft, unsig
 
                         p_ntfs_mft_attr_index_entry entry = body_90->entry;
 
-                        for (int k = 0; k < ROOT_INDEX_SIZE && pos < len; k++, pos += entry++->len)
+                        for (int k = 0; k < INDEX_ROOT_ENTRY_SIZE && pos < len; k++, pos += entry++->len)
                         {
                             *entry = *(p_ntfs_mft_attr_index_entry)(buf_body + pos);
 
@@ -1337,27 +1345,36 @@ int get_ntfs_mft_data(HANDLE device, unsigned __int64 pos, p_ntfs_mft mft, unsig
  * \param   [in]    p_ntfs_root         root            根目录
  * \return          0-成功,~0-失败
  */
-int get_ntfs_root_data(HANDLE device, unsigned __int64 pos, unsigned __int64 len, p_ntfs_root root)
+int get_ntfs_root_data(HANDLE device, unsigned __int64 pos, unsigned __int64 len, p_ntfs_index_alloc root)
 {
     unsigned char *buf = (unsigned char *)malloc((size_t)len);
     get_sector_data(device, pos, (unsigned int)len, buf);
 
-    root->index_file_head = *(p_ntfs_mft_attr_index_file_head)buf;
+    p_ntfs_mft_attr_index_alloc_head  head;
+    p_ntfs_mft_attr_index_entry       entry;
 
-    p_ntfs_mft_attr_index_entry entry = root->index_entry;
-
-    for (int i = 0; i < len / 0x1000; i++)
+    for (int i = 0; i < INDEX_ALLOC_SIZE && i < len / 0x1000; i++, root++)
     {
-        pos = i * 0x1000 + root->index_file_head.entry_offset + 0x18;
+        head  = &(root->head);
+        entry = root->entry;
 
-        for (; pos < root->index_file_head.entry_size; entry++)
+        *head = *(p_ntfs_mft_attr_index_alloc_head)(buf + i * 0x1000);
+
+        if (0 != strncmp(head->name, "INDX", 4))
         {
-            *entry = *(p_ntfs_mft_attr_index_entry)(buf + pos);
+            SP(_T("i:%d INDX error"), i);
+            MessageBox(NULL, txt, g_title, MB_OK);
+        }
+
+        pos = head->entry_offset + 0x18;
+
+        for (int j = 0; j < INDEX_ALLOC_ENTRY_SIZE && pos < head->entry_size; j++, pos += entry++->len)
+        {
+            *entry = *(p_ntfs_mft_attr_index_entry)(buf + i * 0x1000 + pos);
 
             entry->attr_body_30.name[entry->attr_body_30.filename_len] = 0;
 
-            pos += entry->len;
-            root->index_entry_count++;
+            root->entry_count++;
         }
     }
 
@@ -1383,17 +1400,19 @@ int get_mbr_ebr(HANDLE device, unsigned __int64 pos, p_mbr_list_node mbr_list)
         MessageBox(NULL, txt, g_title, MB_OK);
     }
 
-    p_part_table_data tab = &(mbr_list->mbr.part_table[0]);
+    p_part_table_item item = mbr_list->mbr.part_table;
 
-    for (int i = 0; i < 4 && tab->type != 0; i++, tab++)
+    for (int i = 0; i < 4 && item->type != 0; i++, item++)
     {
-        if (tab->type == 0x05 || tab->type == 0x0F) // 05-扩展分区,0F-扩展分区>8G,一个分区表内只能有一个扩展分区
+        if (item->type != 0x05 && item->type != 0x0F) // 05-扩展分区,0F-扩展分区>8G,一个分区表内只能有一个扩展分区
         {
-            mbr_list->next = (p_mbr_list_node)malloc(sizeof(mbr_list_node));
-            memset(mbr_list->next, 0, sizeof(mbr_list_node));
-
-            get_mbr_ebr(device, pos + tab->offset, mbr_list->next);
+            continue;
         }
+
+        mbr_list->next = (p_mbr_list_node)malloc(sizeof(mbr_list_node));
+        memset(mbr_list->next, 0, sizeof(mbr_list_node));
+
+        get_mbr_ebr(device, pos + item->offset, mbr_list->next);
     }
 
     return 0;
@@ -1413,20 +1432,20 @@ int get_file_system(HANDLE device, p_disk_info disk)
 
     unsigned __int64 pos;
     unsigned char buf[512];
-    p_part_table_data tab;
+    p_part_table_item item;
 
     do
     {
-        tab = mbr_list->mbr.part_table;
+        item = mbr_list->mbr.part_table;
 
-        for (int i = 0; i < 4 && tab->type != 0; i++, tab++)
+        for (int i = 0; i < 4 && item->type != 0; i++, item++)
         {
-            if (tab->type == 0x05 || tab->type == 0x0F) // 跳过扩展分区
+            if (item->type == 0x05 || item->type == 0x0F) // 跳过扩展分区
             {
                 continue;
             }
 
-            pos = mbr_list->pos + tab->offset;
+            pos = mbr_list->pos + item->offset;
             get_sector_data(device, pos, 512, buf); // dbr
 
             if (buf[510] != 0x55 || buf[511] != 0xAA)
@@ -1435,12 +1454,12 @@ int get_file_system(HANDLE device, p_disk_info disk)
                 MessageBox(NULL, txt, g_title, MB_OK);
             }
 
-            if (tab->type == 0x07 && 0 == strncmp(buf + 3, "EXFAT", 5)) // NTFS,EXFAT的分区类型都是0x07
+            if (item->type == 0x07 && 0 == strncmp(buf + 3, "EXFAT", 5)) // NTFS,EXFAT的分区类型都是0x07
             {
-                tab->type = 0x01; // EXFAT的分区类型置为1
+                item->type = 0x01; // EXFAT的分区类型置为1
             }
 
-            switch (tab->type)
+            switch (item->type)
             {
                 case 0x06:
                 case 0x16: // FAT16
@@ -1596,7 +1615,7 @@ int get_file_system(HANDLE device, p_disk_info disk)
                     get_sector_data(device, ntfs->pos_bitmap, sizeof(ntfs->bitmap), (unsigned char*)ntfs->bitmap);
                     get_sector_data(device, ntfs->pos_upcase, sizeof(ntfs->upcase), (unsigned char*)ntfs->upcase);
 
-                    get_ntfs_root_data(device, ntfs->pos_root, ntfs->mft[5].attr[4].head_un.rundata_len[0] * ntfs->dbr.cluster_sector_size * 512, &(ntfs->root));
+                    get_ntfs_root_data(device, ntfs->pos_root, ntfs->mft[5].attr[4].head_un.rundata_len[0] * ntfs->dbr.cluster_sector_size * 512, ntfs->root);
                     break;
                 }
             }
@@ -2857,32 +2876,32 @@ void tree_ntfs_mft(HTREEITEM parent, unsigned __int64 pos, p_ntfs_mft mft, unsig
                 }
                 case 0x20:
                 {
-                    p_ntfs_mft_attr_body_20_item item = body_20->item;
+                    p_ntfs_mft_attr_body_20_attr_list attr_list = body_20->attr_list;
 
-                    for (int k = 0; k < body_20->item_count; k++, item++)
+                    for (int k = 0; k < body_20->attr_list_count; k++, attr_list++)
                     {
-                        SP(_T("属性体-类型:      %X"), item->type);
+                        SP(_T("属性体-类型:      %X"), attr_list->type);
                         node_attr_sub = tree_insert_sub(node_attr_data, txt);
 
-                        SP(_T("长度:           %X"), item->len);
+                        SP(_T("长度:           %X"), attr_list->len);
                         tree_insert_sub(node_attr_sub, txt);
 
-                        SP(_T("属性名长度:     %X"), item->name_len);
+                        SP(_T("属性名长度:     %X"), attr_list->name_len);
                         tree_insert_sub(node_attr_sub, txt);
 
-                        SP(_T("属性名偏移:     %X"), item->name_offset);
+                        SP(_T("属性名偏移:     %X"), attr_list->name_offset);
                         tree_insert_sub(node_attr_sub, txt);
 
-                        SP(_T("簇号:           %I64X"), item->begin_cluster);
+                        SP(_T("簇号:           %I64X"), attr_list->begin_cluster);
                         tree_insert_sub(node_attr_sub, txt);
 
-                        SP(_T("文件参考号:     %I64X"), item->ref_id);
+                        SP(_T("文件参考号:     %I64X"), attr_list->ref_id);
                         tree_insert_sub(node_attr_sub, txt);
 
-                        SP(_T("属性ID:         %X"), item->id);
+                        SP(_T("属性ID:         %X"), attr_list->id);
                         tree_insert_sub(node_attr_sub, txt);
 
-                        SP(_T("属性名:         %s"), item->name);
+                        SP(_T("属性名:         %s"), attr_list->name);
                         tree_insert_sub(node_attr_sub, txt);
                     }
                     break;
@@ -3103,7 +3122,7 @@ void tree_ntfs_mft(HTREEITEM parent, unsigned __int64 pos, p_ntfs_mft mft, unsig
                 }
                 default:
                 {
-                    SP(_T("属性:%X %d %d"), head_up->type, i, j);
+                    SP(_T("未知属性:%X %d %d"), head_up->type, i, j);
                     MessageBox(NULL, txt, g_title, MB_OK);
                     break;
                 }
@@ -3112,75 +3131,83 @@ void tree_ntfs_mft(HTREEITEM parent, unsigned __int64 pos, p_ntfs_mft mft, unsig
     }
 }
 
-void tree_ntfs_root(HTREEITEM parent, unsigned __int64 pos, p_ntfs_root root)
+void tree_ntfs_root(HTREEITEM parent, unsigned __int64 pos, p_ntfs_index_alloc root)
 {
     SP(_T("扇区:%08I64X ROOT"), pos);
-    HTREEITEM node = tree_insert_sort(parent, txt);
+    HTREEITEM sub, node = tree_insert_sort(parent, txt);
 
-    p_ntfs_mft_attr_index_file_head file_head = &(root->index_file_head);
+    p_ntfs_mft_attr_index_alloc_head head;
+    p_ntfs_mft_attr_index_entry      entry;
 
-    SP(_T("INDX:                   "));
-    get_unicode_str(txt, file_head->name, 4);
-    tree_insert_sub(node, txt);
-
-    SP(_T("更新序列偏移:           %X"), file_head->update_sn_offset);
-    tree_insert_sub(node, txt);
-
-    SP(_T("更新序列长度:           %X"), file_head->update_sn_size);
-    tree_insert_sub(node, txt);
-
-    SP(_T("日志序列号:             %I64X"), file_head->logfile_sn);
-    tree_insert_sub(node, txt);
-
-    SP(_T("VCN:                    %I64X"), file_head->vcn);
-    tree_insert_sub(node, txt);
-
-    SP(_T("索引项偏移:             %X"), file_head->entry_offset);
-    tree_insert_sub(node, txt);
-
-    SP(_T("索引项大小:             %X"), file_head->entry_size);
-    tree_insert_sub(node, txt);
-
-    SP(_T("索引分配大小:           %X"), file_head->entry_size_alloc);
-    tree_insert_sub(node, txt);
-
-    SP(_T("有子节点:               %X"), file_head->flag);
-    tree_insert_sub(node, txt);
-
-    SP(_T("更新序列:               %X"), file_head->update_sn);
-    tree_insert_sub(node, txt);
-
-    SP(_T("更新序列数组:           %02X %02X %02X %02X %02X %02X %02X %02X  %02X %02X %02X %02X %02X %02X %02X %02X"),
-          file_head->update_array[0],
-          file_head->update_array[1],
-          file_head->update_array[2],
-          file_head->update_array[3],
-          file_head->update_array[4],
-          file_head->update_array[5],
-          file_head->update_array[6],
-          file_head->update_array[7],
-          file_head->update_array[8],
-          file_head->update_array[9],
-          file_head->update_array[10],
-          file_head->update_array[11],
-          file_head->update_array[12],
-          file_head->update_array[13],
-          file_head->update_array[14],
-          file_head->update_array[15]);
-    tree_insert_sub(node, txt);
-
-    p_ntfs_mft_attr_index_entry entry = root->index_entry;
-
-    for (unsigned int i = 0; i < root->index_entry_count; i++, entry++)
+    for (int i = 0; i < INDEX_ALLOC_SIZE && root->entry_count > 0; i++, root++)
     {
-        tree_ntfs_index_entry(node, entry);
+        head = &(root->head);
+        entry = root->entry;
+
+        SP(_T("索引分配%02X"), i);
+        sub = tree_insert_sub(node, txt);
+
+        SP(_T("INDX:                   "));
+        get_unicode_str(txt, head->name, 4);
+        tree_insert_sub(sub, txt);
+
+        SP(_T("更新序列偏移:           %X"), head->update_sn_offset);
+        tree_insert_sub(sub, txt);
+
+        SP(_T("更新序列长度:           %X"), head->update_sn_size);
+        tree_insert_sub(sub, txt);
+
+        SP(_T("日志序列号:             %I64X"), head->logfile_sn);
+        tree_insert_sub(sub, txt);
+
+        SP(_T("VCN:                    %I64X"), head->vcn);
+        tree_insert_sub(sub, txt);
+
+        SP(_T("索引项偏移:             %X"), head->entry_offset);
+        tree_insert_sub(sub, txt);
+
+        SP(_T("索引项大小:             %X"), head->entry_size);
+        tree_insert_sub(sub, txt);
+
+        SP(_T("索引分配大小:           %X"), head->entry_size_alloc);
+        tree_insert_sub(sub, txt);
+
+        SP(_T("有子节点:               %X"), head->flag);
+        tree_insert_sub(sub, txt);
+
+        SP(_T("更新序列:               %X"), head->update_sn);
+        tree_insert_sub(sub, txt);
+
+        SP(_T("更新序列数组:           %02X %02X %02X %02X %02X %02X %02X %02X  %02X %02X %02X %02X %02X %02X %02X %02X"),
+            head->update_array[0],
+            head->update_array[1],
+            head->update_array[2],
+            head->update_array[3],
+            head->update_array[4],
+            head->update_array[5],
+            head->update_array[6],
+            head->update_array[7],
+            head->update_array[8],
+            head->update_array[9],
+            head->update_array[10],
+            head->update_array[11],
+            head->update_array[12],
+            head->update_array[13],
+            head->update_array[14],
+            head->update_array[15]);
+        tree_insert_sub(sub, txt);
+
+        for (unsigned int i = 0; i < root->entry_count; i++, entry++)
+        {
+            tree_ntfs_index_entry(sub, entry);
+        }
     }
 }
 
 void tree_file_system(p_disk_info disk)
 {
     HTREEITEM node_part;
-    p_part_table_data tab;
+    p_part_table_item item;
     HTREEITEM node_disk = disk->tree_node;
     p_mbr_list_node mbr_list = &(disk->mbr_list);
 
@@ -3190,26 +3217,26 @@ void tree_file_system(p_disk_info disk)
            mbr_list->mbr.disk_id[0], mbr_list->mbr.disk_id[1], mbr_list->mbr.disk_id[2], mbr_list->mbr.disk_id[3]);
 
         node_part = tree_insert_sub(node_disk, txt);
-        tab = mbr_list->mbr.part_table;
+        item = mbr_list->mbr.part_table;
 
-        for (int i = 0; i < 4 && tab->type != 0; i++, tab++)
+        for (int i = 0; i < 4 && item->type != 0; i++, item++)
         {
-            SP(_T("分区%d 系统:%02x 偏移:%08X 大小:%08X 类型:%s"), i, tab->system, tab->offset, tab->size, part_type_text[tab->type]);
+            SP(_T("分区%d 系统:%02x 偏移:%08X 大小:%08X 类型:%s"), i, item->system, item->offset, item->size, part_type_text[item->type]);
 
             tree_insert_sub(node_part, txt);
 
-            if (tab->type == 0x05 || tab->type == 0x0F) // 跳过扩展分区
+            if (item->type == 0x05 || item->type == 0x0F) // 跳过扩展分区
             {
                 continue;
             }
 
-            switch (tab->type)
+            switch (item->type)
             {
                 case 0x06:
                 case 0x16: // FAT16
                 {
                     p_fat16_info fat16 = &(mbr_list->file_system[i].fat16);
-                    tree_fat16_dbr(node_disk,    fat16->pos_dbr,   &(fat16->dbr), tab->type);
+                    tree_fat16_dbr(node_disk,    fat16->pos_dbr,     &(fat16->dbr), item->type);
                     tree_fat16_dir(node_disk,    fat16->pos_dir,     fat16->dir);
                     tree_data_bit16(node_disk,   fat16->pos_fat1,    _T("FAT1"), fat16->fat1, FAT_SIZE);
                     tree_data_bit16(node_disk,   fat16->pos_fat2,    _T("FAT2"), fat16->fat2, FAT_SIZE);
@@ -3219,18 +3246,18 @@ void tree_file_system(p_disk_info disk)
                 case 0x0B: // FAT32
                 {
                     p_fat32_info fat32 = &(mbr_list->file_system[i].fat32);
-                    tree_fat32_dbr(node_disk,    fat32->pos_dbr,    &(fat32->dbr), tab->type);
+                    tree_fat32_dbr(node_disk,    fat32->pos_dbr,      &(fat32->dbr), item->type);
                     tree_fat32_dir(node_disk,    fat32->pos_dir,      fat32->dir);
-                    tree_fat32_fsinfo(node_disk, fat32->pos_fsinfo, &(fat32->fsinfo));
-                    tree_data_bit32(node_disk,   fat32->pos_fat1,    _T("FAT1"), fat32->fat1, FAT_SIZE);
-                    tree_data_bit32(node_disk,   fat32->pos_fat2,    _T("FAT2"), fat32->fat2, FAT_SIZE);
+                    tree_fat32_fsinfo(node_disk, fat32->pos_fsinfo,   &(fat32->fsinfo));
+                    tree_data_bit32(node_disk,   fat32->pos_fat1,     _T("FAT1"), fat32->fat1, FAT_SIZE);
+                    tree_data_bit32(node_disk,   fat32->pos_fat2,     _T("FAT2"), fat32->fat2, FAT_SIZE);
                     tree_data_cluster(node_disk, fat32->pos_cluster,  fat32->dbr.cluster_sector_size, fat32->cluster, false);
                     break;
                 }
                 case 0x01: // EXFAT
                 {
                     p_exfat_info exfat = &(mbr_list->file_system[i].exfat);
-                    tree_exfat_dbr(node_disk,    exfat->pos_dbr,   &(exfat->dbr), tab->type);
+                    tree_exfat_dbr(node_disk,    exfat->pos_dbr,    &(exfat->dbr), item->type);
                     tree_exfat_dir(node_disk,    exfat->pos_dir,     exfat->dir);
                     tree_data_bit32(node_disk,   exfat->pos_fat1,    _T("FAT1"),   exfat->fat1,   FAT_SIZE);
                     tree_data_bit32(node_disk,   exfat->pos_fat2,    _T("FAT2"),   exfat->fat2,   FAT_SIZE);
@@ -3242,13 +3269,13 @@ void tree_file_system(p_disk_info disk)
                 case 0x07: // NTFS
                 {
                     p_ntfs_info ntfs = &(mbr_list->file_system[i].ntfs);
-                    tree_ntfs_dbr(node_disk, ntfs->pos_dbr, &(ntfs->dbr), tab->type);
-                    tree_ntfs_mft(node_disk, ntfs->pos_mft, ntfs->mft, ntfs->mft_count, false);
-                    tree_ntfs_mft(node_disk, ntfs->pos_mirr, ntfs->mirr, MIRR_SIZE, true);
-                    tree_ntfs_root(node_disk, ntfs->pos_root, &(ntfs->root));
-                    tree_data_bit8(node_disk, ntfs->pos_bitmap, _T("BITMAP"), ntfs->bitmap, BITMAP_SIZE);
-                    tree_data_bit16(node_disk, ntfs->pos_upcase, _T("UPCASE"), ntfs->upcase, UPCASE_SIZE);
-                    tree_data_cluster(node_disk, ntfs->pos_cluster, ntfs->dbr.cluster_sector_size, ntfs->cluster, true);
+                    tree_ntfs_dbr(node_disk,     ntfs->pos_dbr,      &(ntfs->dbr), item->type);
+                    tree_ntfs_mft(node_disk,     ntfs->pos_mft,      ntfs->mft, ntfs->mft_count, false);
+                    tree_ntfs_mft(node_disk,     ntfs->pos_mirr,     ntfs->mirr, MIRR_SIZE, true);
+                    tree_ntfs_root(node_disk,    ntfs->pos_root,     ntfs->root);
+                    tree_data_bit8(node_disk,    ntfs->pos_bitmap,   _T("BITMAP"), ntfs->bitmap, BITMAP_SIZE);
+                    tree_data_bit16(node_disk,   ntfs->pos_upcase,   _T("UPCASE"), ntfs->upcase, UPCASE_SIZE);
+                    tree_data_cluster(node_disk, ntfs->pos_cluster,  ntfs->dbr.cluster_sector_size, ntfs->cluster, true);
                     break;
                 }
             }
@@ -3261,7 +3288,7 @@ void tree_disk_info()
 {
     g_disk_count = get_disk_info(SIZEOF(g_disk), g_disk);
 
-    for (int i = 0; i < g_disk_count; i++)
+    for (unsigned int i = 0; i < g_disk_count; i++)
     {
         SP(_T("总线:%s 媒介:%s 产品:%s"), bus_type_text[g_disk[i].bus_type], media_type_text[g_disk[i].media_type], g_disk[i].product_id);
 
